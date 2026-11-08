@@ -119,8 +119,12 @@ void Cloak::Toggle() {
         return;
     }
 
-    // If we're ready start cloaking
+    // If we're ready start cloaking (0.5.1: a zero cloak rate never cloaks; talons have Can_Cloak with no rate and
+    // would otherwise sit in 'cloaking' forever, unable to fire)
     if(status == CloakingStatus::ready) {
+        if (rate <= 0) {
+            return;
+        }
         status = CloakingStatus::cloaking;
         return;
     }
@@ -130,7 +134,7 @@ void Cloak::Toggle() {
 }
 
 void Cloak::Activate() {
-    if(status == CloakingStatus::ready) {
+    if(status == CloakingStatus::ready && rate > 0) {
         status = CloakingStatus::cloaking;
     }
 }

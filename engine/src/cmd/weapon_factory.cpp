@@ -102,17 +102,47 @@ static std::string getJSONValue(const json::jobject& object, const std::string &
 
 static float getJSONValue(const json::jobject& object, const std::string &key, const float &default_value) {
     if(object.has_key(key)) {
+        std::string value = object.get(key);
+        // Strip surrounding quotes when the JSON value is a quoted string.
+        // The string overload above strips quotes, but this float overload did
+        // not, so stof() failed on the leading quote of values like "1400" and
+        // silently returned the default — leaving every weapon with the
+        // default speed/range/energy/damage (e.g. slow, short-range lasers).
+        if (value.size() >= 2 && value.front() == '"' && value.back() == '"') {
+            value = value.substr(1, value.size() - 2);
+        }
         try {
-            return std::stof(object.get(key));
+            return std::stof(value);
         } catch(...) {}
         try {
-            return std::stoi(object.get(key));
+            return std::stoi(value);
         } catch(...) {}
     }
 
     return default_value;
 }
 
+
+// 0.5.1 weapon_xml.cpp: projectile speeds under 8000 and all ranges are multiplied by physics/gun_speed (PGG uses .1
+// together with game_speed .1, i.e. Wing Commander "clicks"), and for non-beams the detonation range is stored in
+// pulse_speed, which Missile uses as its detonation radius.
+static void applyClassicWeaponScaling(WeaponInfo &wi, float detonation_range, bool has_detonation_range) {
+    const bool adjusted = vs_options::instance().gun_speed_adjusted_game_speed;
+    const float gun_speed = vs_options::instance().gun_speed * (adjusted ? vs_options::instance().game_speed : 1);
+    if (wi.speed < 1000) {
+        wi.speed *= adjusted ? (1.0 + gun_speed / 1.25) : gun_speed;
+    } else if (wi.speed < 2000) {
+        wi.speed *= adjusted ? (1.0 + gun_speed / 2.5) : gun_speed;
+    } else if (wi.speed < 4000) {
+        wi.speed *= adjusted ? (1.0 + gun_speed / 6.0) : gun_speed;
+    } else if (wi.speed < 8000) {
+        wi.speed *= adjusted ? (1.0 + gun_speed / 17.0) : gun_speed;
+    }
+    wi.range *= adjusted ? (1.0 + gun_speed / 16.0) : gun_speed;
+    if (has_detonation_range && wi.type != WEAPON_TYPE::BEAM) {
+        wi.pulse_speed = detonation_range;
+    }
+}
 
 void WeaponFactory::parseJSON(const std::string &weapon_text) {
     json::jobject weapon = json::jobject::parse(weapon_text);
@@ -161,21 +191,8 @@ void WeaponFactory::parseJSON(const std::string &weapon_text) {
     wi.radial_speed = getJSONValue(weapon, "Distance.radialspeed", wi.radial_speed);
 
 
-    // TODO: detonation range not implemented. Incorrectly assigns to pulse_speed...
-    //wi.bug = inner.get( "Energy.<xmlattr>.detonationrange", wi.bug );
-
-    // TODO: is this really necessary???
-    /*if(vs_options::instance().gun_speed_adjusted_game_speed) {
-        if (wi.speed < 1000) {
-            wi.speed *= 1.0+gun_speed/1.25;
-        } else if (wi.speed < 2000) {
-            wi.speed *= 1.0+gun_speed/2.5;
-        } else if (wi.speed < 4000) {
-            wi.speed *= 1.0+gun_speed/6.0;
-        } else if (wi.speed < 8000) {
-            wi.speed *= 1.0+gun_speed/17.0;
-        }
-    }*/
+    applyClassicWeaponScaling(wi, getJSONValue(weapon, "Distance.detonationrange", 0.0f),
+                              weapon.has_key("Distance.detonationrange"));
 
     // Appearance
     wi.file = getJSONValue(weapon, "Appearance.file", wi.file);

@@ -332,9 +332,15 @@ bool Missile::proximityFuse(Unit *target) {
 
     // checker - checks proximity fuse?
     float checker = target->querySphere(startpos, endpos, rSize());
-    if (checker && detonation_radius >= 0) {
+    // 0.5.1 also detonated when within detonation_radius of the target's surface; querySphere ignores a missile
+    // already inside the target's sphere, so without this missiles slid past or through targets.
+    const bool in_range = detonation_radius >= 0
+            && (Position() - target->Position()).Magnitude() - target->rSize() - rSize() < detonation_radius;
+    if ((checker && detonation_radius >= 0) || in_range) {
         // Set position to the collision point
-        SetPosition(startpos + (endpos - startpos) * checker);
+        if (checker) {
+            SetPosition(startpos + (endpos - startpos) * checker);
+        }
 
         //spiritplumber assumes that the missile is hitting a much larger object than itself
         // It seems spiritplumber is a former dev of the project.
