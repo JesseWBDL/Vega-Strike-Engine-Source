@@ -105,21 +105,30 @@ int num_delayed_missions() {
     return number;
 }
 
+extern vector<int> respawnunit;
+
 void processDelayedMissions() {
     while (!delayed_missions.empty()) {
-        if (delayed_missions.back().player < (unsigned int) _Universe->numPlayers()) {
-            int i = _Universe->CurrentCockpit();
-            _Universe->SetActiveCockpit(delayed_missions.back().player);
-            StarSystem *ss = _Universe->AccessCockpit()->activeStarSystem;
-            if (ss == NULL) {
-                ss = _Universe->activeStarSystem();
-            }
-            _Universe->pushActiveStarSystem(ss);
-            LoadMission(delayed_missions.back().str.c_str(), delayed_missions.back().script, false);
-            delayed_missions.pop_back();
-            _Universe->popActiveStarSystem();
-            _Universe->SetActiveCockpit(i);
+        unsigned int player = delayed_missions.back().player;
+        // Wait (rather than spin forever) for a player that does not exist yet, and
+        // while that player's queued game load (VS.loadGame -> RespawnNow) has not
+        // happened: loading now would put the mission in the outgoing game, and the
+        // load's LoadSavedMissions would then terminate it for good.
+        if (player >= (unsigned int) _Universe->numPlayers()
+                || (player < respawnunit.size() && respawnunit[player])) {
+            break;
         }
+        int i = _Universe->CurrentCockpit();
+        _Universe->SetActiveCockpit(player);
+        StarSystem *ss = _Universe->AccessCockpit()->activeStarSystem;
+        if (ss == NULL) {
+            ss = _Universe->activeStarSystem();
+        }
+        _Universe->pushActiveStarSystem(ss);
+        LoadMission(delayed_missions.back().str.c_str(), delayed_missions.back().script, false);
+        delayed_missions.pop_back();
+        _Universe->popActiveStarSystem();
+        _Universe->SetActiveCockpit(i);
     }
 }
 

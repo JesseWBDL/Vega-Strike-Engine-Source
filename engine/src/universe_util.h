@@ -337,6 +337,14 @@ void SetAutoStatus(int global_auto, int player_auto);
 void LoadMission(std::string missionname);
 void LoadMissionScript(std::string scriptcontents);
 void LoadNamedMissionScript(std::string missiontitle, std::string scriptcontents);
+// Queue a mission to load on the next gameplay frame (processDelayedMissions),
+// i.e. AFTER the new-game LoadSavedMissions has run. Loading a mission
+// immediately during the new-game transition gets it force-terminated by
+// LoadSavedMissions (which kills every non-zeroth mission not listed in the
+// save); delaying it past that point lets it survive into flight. Passing a
+// non-empty script (with a "#title" name) registers it as a persistent
+// active_scripts mission so it is reloaded on every dock/load too.
+void DelayLoadMission(std::string missionname, std::string script);
 QVector SafeEntrancePoint(QVector, float radial_size = -1);
 QVector SafeStarSystemEntrancePoint(StarSystem *sts, QVector, float radial_size = -1);
 float getPlanetRadiusPercent();

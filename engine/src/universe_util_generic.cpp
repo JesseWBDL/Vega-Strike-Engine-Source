@@ -623,9 +623,17 @@ namespace UniverseUtil {
     }
 
     int numActiveMissions() {
+        // PGG: the menu mission a game is started from stays loaded in slot 0 for the whole session, while
+        // the dynamic universe runs as its own mission. Mod scripts (mission limits, campaign checks) expect
+        // only that one background mission, so a menu mission named here is not counted.
+        static const std::string uncounted =
+                vs_config->getVariable("general", "uncounted_mission_name", "");
         int num = 0;
         unsigned int cp = _Universe->CurrentCockpit();
         for (unsigned int i = 0; i < active_missions.size(); ++i) {
+            if (!uncounted.empty() && active_missions[i]->mission_name == uncounted) {
+                continue;
+            }
             if (active_missions[i]->player_num == cp) {
                 num++;
             }
@@ -653,6 +661,10 @@ namespace UniverseUtil {
 
     void LoadNamedMissionScript(string title, string missionscript) {
         ::LoadMission(("#" + title).c_str(), missionscript, false);
+    }
+
+    void DelayLoadMission(string missionname, string script) {
+        ::delayLoadMission(missionname, script);
     }
 
     void LoadMissionScript(string missionscript) {
