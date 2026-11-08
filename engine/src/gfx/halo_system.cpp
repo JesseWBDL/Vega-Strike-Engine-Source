@@ -146,6 +146,21 @@ unsigned int HaloSystem::AddHalo(const char *filename,
             size.j * vs_options::instance().engine_radii_scale,
             size.k * vs_options::instance().engine_length_scale);
     halo.back().mesh = Mesh::LoadMesh((string(filename)).c_str(), Vector(1, 1, 1), neutralfac, NULL);
+    if (halo.back().mesh == nullptr) {
+        // Saves written by older builds name the halo "supernova.bmp.bfxm"; the data now ships .png meshes.
+        string alt(filename);
+        string::size_type bmp = alt.find(".bmp.");
+        if (bmp != string::npos) {
+            alt.replace(bmp, 5, ".png.");
+            halo.back().mesh = Mesh::LoadMesh(alt.c_str(), Vector(1, 1, 1), neutralfac, NULL);
+        }
+    }
+    if (halo.back().mesh == nullptr) {
+        // A halo without a mesh used to crash HaloSystem::Draw as soon as the engines lit up.
+        VS_LOG(warning, (boost::format("Halo mesh '%1%' could not be loaded; engine glow skipped") % filename));
+        halo.pop_back();
+        return halo.size();
+    }
     halo.back().activation = activation_accel * vs_options::instance().game_speed;
     halo.back().oscale = 0;
     halo.back().sparkle_accum = 0;
@@ -193,6 +208,9 @@ void HaloSystem::Draw(const Matrix &trans,
     double sparkledelta = GetElapsedTime() * vs_options::instance().halosparklerate;
 
     for (std::vector<Halo>::iterator i = halo.begin(); i != halo.end(); ++i) {
+        if (i->mesh == nullptr) {
+            continue;
+        }
         Vector thrustvector = TransformNormal(trans, i->trans.getR()).Normalize();
         float value, maxvalue, minvalue;
         if (vs_options::instance().halos_by_velocity) {

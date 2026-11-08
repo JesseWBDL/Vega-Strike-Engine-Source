@@ -138,7 +138,11 @@ protected:
     ///The background associated with this system
     Background *background = nullptr;
     ///The Light Map corresponding for the BP for spheremapping
-    Texture *light_map[6];
+    // Null-initialized: LoadXML doesn't always populate these (e.g. the
+    // "Special/Empty" placeholder system has no background), and the destructor
+    // unconditionally deletes light_map[0..5]. Without this, those deletes hit
+    // uninitialized garbage pointers -> intermittent crash on new-game teardown.
+    Texture *light_map[6] = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
 public:
     // Constructors
     StarSystem(const string filename, const Vector &centroid = Vector(0, 0, 0), const float timeofyear = 0);

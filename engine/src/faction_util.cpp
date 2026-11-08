@@ -46,9 +46,9 @@ using namespace FactionUtil;
 
 Faction::~Faction() {
     delete[] factionname;
-    if (contraband.get()) {
-        contraband->Kill();
-    }
+    // Factions live in a static vector and are only destroyed at process exit, after the collision tables the
+    // contraband unit is registered in have gone. Killing it then crashed on quit, so it is left to the OS
+    // (its shared_ptr has a no-op deleter, see FactionUtil::LoadContrabandLists).
     delete logo;
 }
 
