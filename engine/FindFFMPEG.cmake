@@ -181,11 +181,30 @@ else (FFMPEG_LIBRARIES AND FFMPEG_INCLUDE_DIRS)
         SET(_SWSCALELinkDir ${swscale1_LIBRARY_DIRS})
         SET(_SWSCALELinkFlags ${swscale1_LDFLAGS})
         SET(_SWSCALECflags ${swscale1_CFLAGS})
-        
+
         set(FFMPEG_DEFINITIONS ${FFMPEG_DEFINITIONS} ${_SWSCALECflags})
-        
+
         IF(swscale1_FOUND)
-          SET(FFMPEG_LIBRARIES ${FFMPEG_LIBRARIES} ${swscale1_LIBRARIES})
+          # Resolve the full library path via find_library (matching avcodec/
+          # avformat/avutil above). Using the bare pkg-config name
+          # ${swscale1_LIBRARIES} hands the linker "swscale.lib" with no
+          # directory, which fails on MSVC (LNK1181).
+          find_library(SWSCALE_LIBRARY
+            NAMES
+              swscale
+            PATHS
+              ${_SWSCALELinkDir}
+              ${_FFMPEGLinkDir}
+              /usr/lib
+              /usr/local/lib
+              /opt/local/lib
+              /sw/lib
+          )
+          if (SWSCALE_LIBRARY)
+            SET(FFMPEG_LIBRARIES ${FFMPEG_LIBRARIES} ${SWSCALE_LIBRARY})
+          else (SWSCALE_LIBRARY)
+            SET(FFMPEG_LIBRARIES ${FFMPEG_LIBRARIES} ${swscale1_LIBRARIES})
+          endif (SWSCALE_LIBRARY)
 
           find_path(SWSCALE_INCLUDE_DIR
             NAMES
@@ -200,14 +219,58 @@ else (FFMPEG_LIBRARIES AND FFMPEG_INCLUDE_DIRS)
               ffmpeg
               libswscale
           )
-          
+
           set(FFMPEG_INCLUDE_DIRS
             ${FFMPEG_INCLUDE_DIRS}
             ${SWSCALE_INCLUDE_DIR}
           )
-        
+
           SET(HAVE_SWSCALE_H 1)
         ENDIF(swscale1_FOUND)
+
+        # libswresample - required by the audio codec (FFStream). Was missing
+        # from this module entirely; without it the link fails on swr_* symbols.
+        pkg_check_modules(swresample1 libswresample)
+        SET(_SWRESAMPLEIncDir ${swresample1_INCLUDE_DIRS})
+        SET(_SWRESAMPLELinkDir ${swresample1_LIBRARY_DIRS})
+        set(FFMPEG_DEFINITIONS ${FFMPEG_DEFINITIONS} ${swresample1_CFLAGS})
+        IF(swresample1_FOUND)
+          find_library(SWRESAMPLE_LIBRARY
+            NAMES
+              swresample
+            PATHS
+              ${_SWRESAMPLELinkDir}
+              ${_FFMPEGLinkDir}
+              /usr/lib
+              /usr/local/lib
+              /opt/local/lib
+              /sw/lib
+          )
+          if (SWRESAMPLE_LIBRARY)
+            SET(FFMPEG_LIBRARIES ${FFMPEG_LIBRARIES} ${SWRESAMPLE_LIBRARY})
+          else (SWRESAMPLE_LIBRARY)
+            SET(FFMPEG_LIBRARIES ${FFMPEG_LIBRARIES} ${swresample1_LIBRARIES})
+          endif (SWRESAMPLE_LIBRARY)
+
+          find_path(SWRESAMPLE_INCLUDE_DIR
+            NAMES
+              swresample.h
+            PATHS
+              ${_SWRESAMPLEIncDir}
+              /usr/include
+              /usr/local/include
+              /opt/local/include
+              /sw/include
+            PATH_SUFFIXES
+              ffmpeg
+              libswresample
+          )
+          set(FFMPEG_INCLUDE_DIRS
+            ${FFMPEG_INCLUDE_DIRS}
+            ${SWRESAMPLE_INCLUDE_DIR}
+          )
+          SET(HAVE_SWRESAMPLE_H 1)
+        ENDIF(swresample1_FOUND)
       ENDIF(avutil1_FOUND)
     ENDIF (avformat1_FOUND)
   ENDIF(ffmpeg1_FOUND)

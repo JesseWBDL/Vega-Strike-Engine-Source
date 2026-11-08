@@ -18,6 +18,16 @@
         "boost-program-options",
         "egl-registry",
         "expat",
+        {
+            "name": "ffmpeg",
+            "default-features": false,
+            "features": [
+                "avcodec",
+                "avformat",
+                "swresample",
+                "swscale"
+            ]
+        },
         "freeglut",
         "libpng",
         "libjpeg-turbo",
