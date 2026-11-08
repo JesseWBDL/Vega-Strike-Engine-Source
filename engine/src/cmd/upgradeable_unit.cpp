@@ -100,8 +100,8 @@ void UpgradeableUnit::UpgradeUnit(const std::string &upgrades) {
         std::vector<std::string> upgrade_vector;
         boost::split(upgrade_vector, upgrade, boost::is_any_of(delimiter));
 
-        const unsigned int mount_offset = convert_to_int(upgrade_vector[1]);
-        const unsigned int subunit_offset = convert_to_int(upgrade_vector[2]);
+        const unsigned int mount_offset = upgrade_vector.size() > 1 ? convert_to_int(upgrade_vector[1]) : 0;
+        const unsigned int subunit_offset = upgrade_vector.size() > 2 ? convert_to_int(upgrade_vector[2]) : 0;
 
         const Unit *upgradee = UnitConstCache::getCachedConst(StringIntKey(upgrade, FactionUtil::GetUpgradeFaction()));
         if (!upgradee) {
@@ -109,6 +109,12 @@ void UpgradeableUnit::UpgradeUnit(const std::string &upgrades) {
                     new Unit(upgrade.c_str(),
                             true,
                             FactionUtil::GetUpgradeFaction()));
+        }
+        // A part that failed to load never ran LoadRow, so fitting it would copy
+        // uninitialised stats (e.g. a huge ECM rating that drains the reactor).
+        if (upgradee->name == "LOAD_FAILED") {
+            VS_LOG(debug, (boost::format("UpgradeUnit: skipping unloadable upgrade %1%") % upgrade));
+            continue;
         }
 
         double percent = 1.0;
@@ -198,7 +204,13 @@ bool UpgradeableUnit::UpgradeMounts(const Unit *up,
 
                             const Unit *weapon = getUnitFromUpgradeName(weaponname);
 
-                            cancompletefully = upgraded_mount->AddAmmo(upgraded_mount, weapon, touchme);
+                            // The ammo comes from the upgrade's mount (0.5.1 added up->mounts[i].ammo); passing the
+                            // ship's own mount here doubled whatever was already loaded on every purchase.
+                            cancompletefully = upgraded_mount->AddAmmo(upgrading_mount, weapon, touchme);
+                            if (cancompletefully) {
+                                ++numave;
+                                percentage += 1;
+                            }
                         }
                     } else {
                         cancompletefully = false;

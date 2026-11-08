@@ -154,7 +154,7 @@ public:
     // TODO: take a deeper look at this much later...
     //how likely to fool missiles
     // -2 = inactive L2, -1 = inactive L1, 0 = not available, 1 = active L1, 2 = active L2, etc...
-    int ecm;
+    int ecm = 0;
 
     /// Repair
     // TODO: Maybe move to damageable

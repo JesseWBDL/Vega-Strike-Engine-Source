@@ -2868,8 +2868,14 @@ bool Unit::UpAndDownGrade(const Unit *up,
     bool cancompletefully = true;
     bool can_be_redeemed = false;
     bool needs_redemption = false;
+    // A weapon or missile fitted to a mount is a gain in its own right. Without counting it, an upgrade row whose
+    // other stats sit below the ship's (every PGG weapon has Jump_Drive_Delay=1 vs a ship's 10, and PGG runs with
+    // empty_cell_check=FALSE) "needs redemption" with nothing to redeem it: the call reported failure after the
+    // mount had already been swapped in, so the shop showed an error and the weapon was fitted for free.
+    bool mount_gained = false;
     if (mountoffset >= 0) {
         cancompletefully = UpgradeMounts(up, mountoffset, touchme, downgrade, numave, percentage);
+        mount_gained = !downgrade && cancompletefully && numave > 0 && up->getNumMounts() > 0;
     }
     bool cancompletefully1 = true;
     if (subunitoffset >= 0) {
@@ -3059,6 +3065,11 @@ bool Unit::UpAndDownGrade(const Unit *up,
 
     if (!csv_cell_null_check || force_change_on_nothing || cell_has_recursive_data(upgrade_name, up->faction, "Hull")) {
         STDUPGRADE(upgrade_hull, up->upgrade_hull, templ->upgrade_hull, 0);
+    }
+    // PGG: write the result back to the hull, as 0.5.1's STDUPGRADE(hull, ...) did. Without this a repair
+    // (RepairUpgrade against the blank ship) and hull upgrades never changed the hull at all.
+    if (touchme && current_hull && upgrade_hull != *current_hull) {
+        *current_hull = upgrade_hull;
     }
 
     if ((hull->facets[0].max_health < hull->facets[0].health) && (!Destroyed())) {
@@ -3414,7 +3425,7 @@ bool Unit::UpAndDownGrade(const Unit *up,
         }
     }
     if (needs_redemption) {
-        if (!can_be_redeemed) {
+        if (!can_be_redeemed && !mount_gained) {
             cancompletefully = false;
         }
     }
@@ -3511,6 +3522,25 @@ int Unit::RepairCost() {
     if (LifeSupportFunctionalityMax < 1) {
         ++cost;
     }
+    // PGG: thruster/engine damage (DamageRandSys lowers limits.* and the governors) and hull damage are
+    // repaired by RepairUpgrade against the blank ship, so count them here too. The damages flag is not
+    // saved, so also compare with the blank ship to catch damage carried over a save/load.
+    if (damages & Damages::LIMITS_DAMAGED) {
+        ++cost;
+    } else if (const Unit *blank = makeFinalBlankUpgrade(name, faction)) {
+        if (blank->name != string("LOAD_FAILED")
+                && (limits.yaw < blank->limits.yaw || limits.pitch < blank->limits.pitch
+                        || limits.roll < blank->limits.roll || limits.lateral < blank->limits.lateral
+                        || limits.vertical < blank->limits.vertical || limits.forward < blank->limits.forward
+                        || limits.retro < blank->limits.retro || limits.afterburn < blank->limits.afterburn
+                        || computer.max_combat_speed < blank->computer.max_combat_speed
+                        || computer.max_combat_ab_speed < blank->computer.max_combat_ab_speed)) {
+            ++cost;
+        }
+    }
+    if (current_hull && *current_hull < hull->facets[as_integer(FacetName::single)].max_health) {
+        ++cost;
+    }
     for (i = 0; i < numCargo(); ++i) {
         if (GetCargo(i).GetCategory().find(DamagedCategory) == 0) {
             ++cost;
@@ -3581,6 +3611,13 @@ int Unit::RepairUpgrade() {
     }
     if (LifeSupportFunctionalityMax < 1) {
         LifeSupportFunctionalityMax = 1;
+        pct = 1;
+        success += 1;
+    }
+    // PGG: a repair also restores the hull to its maximum. The blank ship's hull (tarsus.blank: 5) is below
+    // a stock ship's (10), so the Upgrade() pass above can never raise a damaged hull.
+    if (current_hull && *current_hull < hull->facets[as_integer(FacetName::single)].max_health) {
+        *current_hull = hull->facets[as_integer(FacetName::single)].max_health;
         pct = 1;
         success += 1;
     }

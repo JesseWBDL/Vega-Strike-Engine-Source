@@ -53,8 +53,42 @@
 #include "resource/resource.h"
 #include "unit_csv_factory.h"
 #include "upgradeable_unit.h"
+#include "faction_generic.h"
+#include <boost/algorithm/string.hpp>
 
 extern int GetModeFromName(const char *input_buffer);
+
+// Fit each upgrade in an "Upgrades" cell: {name;mount_offset;subunit_offset}...
+static void ApplyDefaultUpgrades(Unit *unit, const std::string &upgrades) {
+    std::string::size_type pos = 0;
+    while ((pos = upgrades.find('{', pos)) != std::string::npos) {
+        const std::string::size_type end = upgrades.find('}', pos);
+        if (end == std::string::npos) {
+            break;
+        }
+        std::vector<std::string> fields;
+        boost::split(fields, upgrades.substr(pos + 1, end - pos - 1), boost::is_any_of(";"));
+        pos = end + 1;
+        if (fields.empty() || fields[0].empty()) {
+            continue;
+        }
+        const std::string &name = fields[0];
+        const int mount_offset = fields.size() > 1 ? atoi(fields[1].c_str()) : 0;
+        const int subunit_offset = fields.size() > 2 ? atoi(fields[2].c_str()) : 0;
+        const int upgrade_faction = FactionUtil::GetUpgradeFaction();
+        const Unit *upgradee = UnitConstCache::getCachedConst(StringIntKey(name, upgrade_faction));
+        if (!upgradee) {
+            upgradee = UnitConstCache::setCachedConst(StringIntKey(name, upgrade_faction),
+                    new Unit(name.c_str(), true, upgrade_faction));
+        }
+        if (upgradee->name.get() == "LOAD_FAILED") {
+            VS_LOG(warning, (boost::format("Default upgrade %1% for %2% not found") % name % unit->name.get()));
+            continue;
+        }
+        double percent = 1.0;
+        unit->Upgrade(upgradee, mount_offset, subunit_offset, GetModeFromName(name.c_str()), true, percent, nullptr);
+    }
+}
 extern void pushMesh(std::vector<Mesh *> &mesh,
         float &randomstartframe,
         float &randomstartseconds,
@@ -957,6 +991,13 @@ void Unit::LoadRow(std::string unit_identifier, string modification, bool saved_
     computer.slide_end = UnitCSVFactory::GetVariable(unit_key, "Slide_End", 0);
 
     UpgradeUnit(UnitCSVFactory::GetVariable(unit_key, "Cargo", std::string()));
+
+    // Default loadout from the "Upgrades" column, e.g. {shield_4_Level1;;}{reactor_level_2;;}.
+    // Older data sets (Privateer Gemini Gold) give their ships shields and reactors only this
+    // way. Saved ships already carry the upgraded stats, so fit only freshly built units.
+    if (!saved_game) {
+        ApplyDefaultUpgrades(this, UnitCSVFactory::GetVariable(unit_key, "Upgrades", std::string()));
+    }
 
 
     {
