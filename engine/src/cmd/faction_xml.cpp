@@ -43,7 +43,8 @@ using namespace XMLSupport;
 
 static int unitlevel;
 
-static vector<std::string> contrabandlists;
+// Filled by FactionFactory::parse (it used to be filled by the old expat parser and was left empty).
+std::vector<std::string> contrabandlists;
 
 void Faction::LoadXML(const char *filename, char *xmlbuffer, int buflength) {
     using namespace VSFileSystem;
@@ -112,7 +113,7 @@ void Faction::LoadXML(const char *filename, char *xmlbuffer, int buflength) {
 void FactionUtil::LoadContrabandLists() {
     for (unsigned int i = 0; i < factions.size() && i < contrabandlists.size(); i++) {
         if (contrabandlists[i].length() > 0) {
-            factions[i]->contraband.reset(new Unit(contrabandlists[i].c_str(), true, i));
+            factions[i]->contraband.reset(new Unit(contrabandlists[i].c_str(), true, i), [](Unit *) {});
         }
     }
     contrabandlists.clear();

@@ -50,15 +50,21 @@ void Faction::ParseAllAllies() {
 void Faction::ParseAllies(unsigned int thisfaction) {
     unsigned int i, j;
     vector<faction_stuff> tempvec;
+    vector<faction_stuff> known;
     for (i = 0; i < faction.size(); i++) {
         for (j = 0; j < factions.size(); j++) {
             if (strcmp(faction[i].stats.name, factions[j]->factionname) == 0) {
-                delete[] faction[i].stats.name;
-                faction[i].stats.index = j;
                 break;
             }
         }
+        // Drop entries naming a faction that does not exist; their index would be garbage.
+        delete[] faction[i].stats.name;
+        if (j < factions.size()) {
+            faction[i].stats.index = j;
+            known.push_back(faction[i]);
+        }
     }
+    faction.swap(known);
     for (i = 0; i < factions.size(); i++) {
         tempvec.push_back(faction_stuff());
         tempvec[i].stats.index = i;

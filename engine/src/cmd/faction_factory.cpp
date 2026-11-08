@@ -30,6 +30,11 @@
 #include "faction_factory.h"
 #include "faction_generic.h"
 #include "gfx/animation.h"
+#include "cmd/ai/communication.h"
+#include "vsfilesystem.h"
+
+#include <map>
+#include <cstring>
 
 #include <boost/property_tree/ptree.hpp>
 #include <boost/property_tree/xml_parser.hpp>
@@ -46,6 +51,7 @@ using boost::optional;
 using std::string;
 
 extern std::vector<boost::shared_ptr<Faction> > factions;   //the factions
+extern std::vector<std::string> contrabandlists;            // faction_xml.cpp, one entry per faction
 
 FactionFactory::FactionFactory(std::string filename) {
     pt::ptree tree;
@@ -62,6 +68,7 @@ FactionFactory::FactionFactory(std::string filename) {
 
 void FactionFactory::parse(ptree tree) {
     int counter = 0;
+    std::map<string, boost::shared_ptr<FSM> > conversations;   // each conversation file is loaded once
     for (const auto &iterator : tree) {
         if (iterator.first != "Faction") {
             continue;
@@ -106,10 +113,62 @@ void FactionFactory::parse(ptree tree) {
                 continue;
             }
 
+            if (type == "ShipModifier") {
+                // Per ship-type attitude (e.g. retro towards "talon"), added on top of the faction relation.
+                // Kept separate from <stats>, as 0.5.1 did; zero entries are skipped like the old parser.
+                string name = inner.get("<xmlattr>.name", "");
+                float relation = inner.get("<xmlattr>.relation", 0.0f);
+                if (relation != 0 && !name.empty()) {
+                    faction->ship_relation_modifier[name] = relation;
+                }
+                continue;
+            }
+
+            if (type == "CommAnimation") {
+                // The faces shown on the comm screen when this faction's pilots talk (0.5.1 faction_xml.cpp).
+                faction->comm_faces.push_back(Faction::comm_face_t());
+                faction->comm_face_sex.push_back((unsigned char) inner.get("<xmlattr>.sex", 0));
+                if (boost::optional<string> dock = inner.get_optional<string>("<xmlattr>.dockable_only")) {
+                    faction->comm_faces.back().dockable = XMLSupport::parse_bool(*dock)
+                            ? Faction::comm_face_t::CYES : Faction::comm_face_t::CNO;
+                }
+                if (boost::optional<string> base = inner.get_optional<string>("<xmlattr>.base_only")) {
+                    faction->comm_faces.back().base = XMLSupport::parse_bool(*base)
+                            ? Faction::comm_face_t::CYES : Faction::comm_face_t::CNO;
+                }
+                for (const auto &mood : inner) {
+                    if (mood.first == "MoodAnimation") {
+                        string ani = mood.second.get("<xmlattr>.name", "");
+                        if (!ani.empty()) {
+                            faction->comm_faces.back().animations.push_back(FactionUtil::createAnimation(ani.c_str()));
+                        }
+                    }
+                }
+                continue;
+            }
+
             if (type == "stats") {
                 string name = inner.get("<xmlattr>.name", "Unknown");
-                int relation = inner.get("<xmlattr>.relation", 0);
-                faction->ship_relation_modifier[name] = relation;
+                // Relations are fractions (e.g. -.5); reading them as int turned them all into 0.
+                float relation = inner.get("<xmlattr>.relation", 0.0f);
+
+                // My attitude towards faction <name>, and the conversation used with it
+                // (e.g. conversation="privtomining.xml"). Indexed by ParseAllies.
+                Faction::faction_stuff stuff;
+                stuff.stats.name = new char[name.size() + 1];
+                strcpy(stuff.stats.name, name.c_str());
+                stuff.relationship = relation;
+                string conversation = inner.get("<xmlattr>.conversation", "");
+                if (!conversation.empty()) {
+                    auto cached = conversations.find(conversation);
+                    if (cached != conversations.end()) {
+                        stuff.conversation = cached->second;
+                    } else if (VSFileSystem::LookForFile(conversation, VSFileSystem::CommFile) <= VSFileSystem::Ok) {
+                        stuff.conversation.reset(new FSM(conversation));
+                        conversations[conversation] = stuff.conversation;
+                    }
+                }
+                faction->faction.push_back(stuff);
             }
         }
 
@@ -123,5 +182,6 @@ void FactionFactory::parse(ptree tree) {
         }
 
         factions.push_back(faction);
+        contrabandlists.push_back(contraband);   // turned into units by FactionUtil::LoadContrabandLists
     }
 }
