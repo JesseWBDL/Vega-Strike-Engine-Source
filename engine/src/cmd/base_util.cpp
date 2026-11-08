@@ -70,7 +70,7 @@ typedef boost::python::dictionary BoostPythonDictionary;
 #include "configxml.h"
 #include "vs_logging.h"
 
-extern float getFontHeight();
+extern float getTextPlaneRowHeight();
 
 using Audio::Source;
 using Audio::Sound;
@@ -884,11 +884,19 @@ const Dictionary &GetEventData() {
 }
 
 float GetTextHeight(std::string text, Vector widheimult) {
-    static bool force_highquality = true;
-    static bool use_bit = force_highquality
-            || XMLSupport::parse_bool(vs_config->getVariable("graphics", "high_quality_font", "false"));
-    static float font_point = XMLSupport::parse_float(vs_config->getVariable("graphics", "font_point", "16"));
-    return use_bit ? getFontHeight() : (font_point * 2 / g_game.y_resolution);
+    // Must equal the row height BaseText draws with, or Python layouts built on it
+    // (e.g. the Quine save list) pile rows on top of each other. BaseText::Draw
+    // renders with the configured font (not forced bitmap) at the base_max-clamped
+    // resolution, so measure under the same conditions.
+    int tmpy = g_game.y_resolution;
+    static int base_max_width = XMLSupport::parse_int(vs_config->getVariable("graphics", "base_max_width", "0"));
+    static int base_max_height = XMLSupport::parse_int(vs_config->getVariable("graphics", "base_max_height", "0"));
+    if (base_max_width && base_max_height && base_max_height < tmpy) {
+        g_game.y_resolution = base_max_height;
+    }
+    float rowheight = getTextPlaneRowHeight();
+    g_game.y_resolution = tmpy;
+    return rowheight;
 }
 
 float GetTextWidth(std::string text, Vector widheimult) {

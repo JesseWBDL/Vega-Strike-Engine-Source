@@ -136,6 +136,29 @@ float getFontHeight() {
     return point / g_game.y_resolution;
 }
 
+// Stroke-font point size at the current g_game.y_resolution. font_point is
+// authored for an ~600px-tall display; without this scaling the metrics in
+// TextPlane::Draw normalize a fixed pixel size by the actual resolution, so the
+// text shrinks to nothing at high resolutions (e.g. the SET/KPS readout at 4K).
+// Only grows above the reference height, so standard-resolution layouts are
+// unchanged.
+static float getScaledFontPoint() {
+    static float font_point = XMLSupport::parse_float(vs_config->getVariable("graphics", "font_point", "16"));
+    static float font_reference_height =
+            XMLSupport::parse_float(vs_config->getVariable("graphics", "font_reference_height", "600"));
+    if (font_reference_height > 0 && g_game.y_resolution > font_reference_height) {
+        return font_point * (g_game.y_resolution / font_reference_height);
+    }
+    return font_point;
+}
+
+// Row height (normalized units) that TextPlane::Draw advances by at the current
+// g_game resolution, for callers that lay text out themselves (Base.GetTextHeight).
+float getTextPlaneRowHeight() {
+    static bool use_bit = XMLSupport::parse_bool(vs_config->getVariable("graphics", "high_quality_font", "false"));
+    return use_bit ? getFontHeight() : getScaledFontPoint() / (.5 * g_game.y_resolution);
+}
+
 TextPlane::TextPlane(const GFXColor &c, const GFXColor &bgcol) {
     col = c;
     this->bgcol = bgcol;
@@ -210,10 +233,22 @@ void DrawSquare(float left, float right, float top, float bot) {
     GFXDraw(GFXQUAD, verts, 8);
 }
 
+// Advance of a stroke-font character. GLUT's stroke Roman space is as wide as a 'W', so text
+// laid out with spaces for the bitmap fonts (e.g. Privateer's centred mission computer
+// screens) overflows and wraps; give the space a bitmap-like proportion instead.
+static float strokeWidth(unsigned char c) {
+    if (c == ' ') {
+        static float space_ratio =
+                XMLSupport::parse_float(vs_config->getVariable("graphics", "stroke_space_width", "0.3"));
+        return glutStrokeWidth(GLUT_STROKE_ROMAN, 'W') * space_ratio;
+    }
+    return glutStrokeWidth(GLUT_STROKE_ROMAN, c);
+}
+
 float charWidth(char c, float myFontMetrics) {
     static bool use_bit = XMLSupport::parse_bool(vs_config->getVariable("graphics", "high_quality_font", "false"));
     void *fnt = use_bit ? getFont() : GLUT_STROKE_ROMAN;
-    float charwid = use_bit ? glutBitmapWidth(fnt, c) : glutStrokeWidth(fnt, c);
+    float charwid = use_bit ? glutBitmapWidth(fnt, c) : strokeWidth(c);
     float dubyawid = use_bit ? glutBitmapWidth(fnt, 'W') : glutStrokeWidth(fnt, 'W');
     return charwid * myFontMetrics / dubyawid;
 }
@@ -246,14 +281,15 @@ int TextPlane::Draw(const string &newText, int offset, bool startlower, bool for
     static bool use_bit = force_highquality
             || XMLSupport::parse_bool(vs_config->getVariable("graphics", "high_quality_font", "false"));
     static float font_point = XMLSupport::parse_float(vs_config->getVariable("graphics", "font_point", "16"));
+    float font_point_scaled = getScaledFontPoint();
     static bool font_antialias = XMLSupport::parse_bool(vs_config->getVariable("graphics", "font_antialias", "true"));
     void *fnt = getFont();
     static float std_wid = glutStrokeWidth(GLUT_STROKE_ROMAN, 'W');
-    myFontMetrics.i = font_point * std_wid / (119.05 + 33.33);
+    myFontMetrics.i = font_point_scaled * std_wid / (119.05 + 33.33);
     if (use_bit) {
         myFontMetrics.i = glutBitmapWidth(fnt, 'W');
     }
-    myFontMetrics.j = font_point;
+    myFontMetrics.j = font_point_scaled;
     myFontMetrics.i /= .5 * g_game.x_resolution;
     myFontMetrics.j /= .5 * g_game.y_resolution;
     float tmp, row, col;
@@ -327,7 +363,7 @@ int TextPlane::Draw(const string &newText, int offset, bool startlower, bool for
                 shadowlen = glutBitmapWidth(fnt, myc) / (float) (.5
                         * g_game.x_resolution);                    //need to use myc -- could have transformed '_' to ' '
             } else {
-                shadowlen = myFontMetrics.i * glutStrokeWidth(GLUT_STROKE_ROMAN, myc) / std_wid;
+                shadowlen = myFontMetrics.i * strokeWidth(myc) / std_wid;
             }
         }
         if (*text_it == '#') {
@@ -367,7 +403,9 @@ int TextPlane::Draw(const string &newText, int offset, bool startlower, bool for
             retval += potentialincrease;
             potentialincrease = 0;
             int lists = display_lists[myc + (isInside() ? 128 : 0)];
-            if (lists) {
+            if (!use_bit && myc == ' ') {
+                glTranslatef(strokeWidth(' '), 0, 0);   // narrow space; see strokeWidth
+            } else if (lists) {
                 GFXCallList(lists);
             } else {
                 if (use_bit) {
