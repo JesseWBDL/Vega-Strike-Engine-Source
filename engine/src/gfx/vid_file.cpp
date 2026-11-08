@@ -68,6 +68,9 @@ private:
     AVStream *pStream;
     AVPacket *packet;
     SwsContext *pSWSCtx;
+    int swsSrcFormat;   // source pixel format the scaler was built for (-1 = none yet)
+    int swsSrcW;
+    int swsSrcH;
     int videoStreamIndex;
     bool frameReady;
     bool draining;
@@ -84,8 +87,34 @@ private:
 
     void convertFrame() {
         if (frameReady) {
+            // (Re)build the scaler against the ACTUAL decoded frame's pixel
+            // format and dimensions. pCodecCtx->pix_fmt can be AV_PIX_FMT_NONE
+            // until the first frame is decoded, so a scaler built up-front (in
+            // open(), before priming) is set up for the wrong format and emits
+            // an all-black image. Building it here, from pNextFrameYUV, fixes
+            // that and also handles mid-stream format changes.
+            int srcFmt = (pNextFrameYUV->format != AV_PIX_FMT_NONE)
+                    ? pNextFrameYUV->format
+                    : (int) pCodecCtx->pix_fmt;
+            if (pSWSCtx == nullptr || swsSrcFormat != srcFmt
+                    || swsSrcW != pNextFrameYUV->width
+                    || swsSrcH != pNextFrameYUV->height) {
+                if (pSWSCtx != nullptr) {
+                    sws_freeContext(pSWSCtx);
+                    pSWSCtx = nullptr;
+                }
+                pSWSCtx = sws_getContext(pNextFrameYUV->width, pNextFrameYUV->height,
+                        (AVPixelFormat) srcFmt, width, height, AV_PIX_FMT_RGB24,
+                        SWS_LANCZOS, nullptr, nullptr, nullptr);
+                swsSrcFormat = srcFmt;
+                swsSrcW = pNextFrameYUV->width;
+                swsSrcH = pNextFrameYUV->height;
+            }
+            if (pSWSCtx == nullptr) {
+                return;
+            }
             sws_scale(pSWSCtx, pNextFrameYUV->data, pNextFrameYUV->linesize, 0,
-                    pCodecCtx->height, pFrameRGB->data, pFrameRGB->linesize);
+                    pNextFrameYUV->height, pFrameRGB->data, pFrameRGB->linesize);
             prevPTS = fbPTS;
             fbPTS = nextPTS;
 
@@ -163,6 +192,9 @@ public:
             , pStream(nullptr)
             , packet(nullptr)
             , pSWSCtx(nullptr)
+            , swsSrcFormat(-1)
+            , swsSrcW(0)
+            , swsSrcH(0)
             , videoStreamIndex(-1)
             , frameReady(false)
             , draining(false)
@@ -319,10 +351,17 @@ public:
         //Initialize timebase counters
         prevPTS = fbPTS = nextPTS = lastDTS = 0;
 
-        pSWSCtx = sws_getContext(pCodecCtx->width, pCodecCtx->height, pCodecCtx->pix_fmt,
-                width, height, AV_PIX_FMT_RGB24, SWS_LANCZOS, nullptr, nullptr, nullptr);
-        if (pSWSCtx == nullptr) {
-            throw VidFile::Exception("Problem during scaler initialization");
+        // NOTE: the scaler (pSWSCtx) is built lazily in convertFrame() from the
+        // first decoded frame's actual pixel format. Building it here from
+        // pCodecCtx->pix_fmt is unreliable because that can be AV_PIX_FMT_NONE
+        // until a frame has been decoded, which produced an all-black image.
+
+        // Prime the first frame so the initial seek()/convertFrame() has real
+        // decoded data instead of an empty YUV buffer (which rendered blank).
+        try {
+            nextFrame();
+        } catch (const VidFile::EndOfStreamException &) {
+            // empty/zero-frame video; leave frameReady false
         }
     }
 

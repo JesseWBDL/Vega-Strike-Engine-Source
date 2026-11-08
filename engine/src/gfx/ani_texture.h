@@ -89,6 +89,10 @@ protected:
     // for video de-jittering
     double lastcurtime;
     double lastrealtime;
+    // true once the audio time source has begun actually advancing, so the
+    // first audio-driven frame can hard-snap the picture into sync instead of
+    // easing in from the wall-clock free-run (which looked like ~1s of A/V lag).
+    bool audioWasRunning;
 
     bool constframerate;
     bool done;

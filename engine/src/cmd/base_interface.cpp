@@ -294,13 +294,15 @@ void BaseInterface::Room::BaseVSMovie::Draw(BaseInterface *base) {
 
     BaseInterface::Room::BaseVSSprite::Draw(base);
 
-    if (soundsource.get() == NULL) {
-        // If there is no sound source, and the sprite is an animated sprite, and
-        // it's finished, then we must invoke the callback
-        if (!getCallback().empty() && spr.Done()) {
-            RunPython(getCallback().c_str());
-            playing = false;
-        }
+    // Invoke the end-of-movie callback once the VIDEO has finished, regardless
+    // of whether an audio time source exists. Previously this only ran when
+    // soundsource==NULL, so a movie that has an audio track (even one that
+    // never actually plays) would sit frozen on its last frame until the user
+    // clicked. Keying off spr.Done() (the decoder hitting end-of-stream) makes
+    // the intro/cutscene advance to the next room on its own.
+    if (!getCallback().empty() && spr.Done()) {
+        RunPython(getCallback().c_str());
+        playing = false;
     }
 }
 

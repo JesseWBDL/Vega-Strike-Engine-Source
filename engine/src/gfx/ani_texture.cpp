@@ -250,28 +250,51 @@ void AnimatedTexture::UpdateAllFrame() {
     double realtime = realTime();
     for (set<AnimatedTexture *>::iterator iter = anis.begin(); iter != anis.end(); iter++) {
         AnimatedTexture *ani = *iter;
-        if (ani->options & optSoundTiming) {
-            // lazy init
-            if (ani->lastrealtime == 0) {
-                ani->lastrealtime = realtime;
-            }
-
-            // de-jitter, playtime reporting tends to have some jitter
-            double newcurtime = ani->GetTimeSource()->getPlayingTime();
-            double delta = realtime - ani->lastrealtime;
-            double drift = newcurtime - ani->lastcurtime - delta;
-            if (fabs(drift) > 4.0) {
-                ani->lastcurtime = newcurtime - delta;
-                ani->lastrealtime = realtime;
-            } else if (drift > 0.2 || drift < -1.0) {
-                //  ^ asymmetric threshold because we don't want to skip back often
-                double catchup = drift * ((delta > 0.5) ? 0.5 : delta);
-                ani->lastcurtime += catchup;
-                ani->lastrealtime = realtime;
-            }
-            ani->setTime(ani->lastcurtime + delta);
+        // Only slave the video frame clock to the audio source while that
+        // source is actually playing. If the clip has no usable audio track
+        // (or the audio stream never starts), getPlayingTime() pins near 0 and
+        // the de-jitter logic below would clamp the picture to the first frame
+        // (= a "blank"/black fade-in). Free-running on real time instead keeps
+        // the visuals playing reliably for every cutscene, with or without sound.
+        SharedPtr<Audio::Source> ts = (ani->options & optSoundTiming) ? ani->GetTimeSource() : SharedPtr<Audio::Source>();
+        // Only treat the audio source as the frame clock when it is genuinely
+        // ADVANCING (playing AND its play time has moved off zero). A source
+        // that reports isPlaying() but stays at time 0 (e.g. a video whose
+        // audio track never starts) would otherwise drive the de-jitter path to
+        // set lastcurtime = playTime(0) - delta = NEGATIVE, poisoning the clock
+        // so every frame thereafter clamps to frame 0 (a permanent black fade-in).
+        bool audioRunning = (ts.get() != NULL) && ts->isPlaying() && (ts->getPlayingTime() > 0.0);
+        if (audioRunning) {
+            // Drive the video frame clock DIRECTLY from the audio playback
+            // position. The old drift/de-jitter machinery (lastcurtime/
+            // lastrealtime/catchup) assumed it was called exactly once per
+            // frame, but UpdateAllFrame runs twice per frame here (once from the
+            // base interface, once from the privateer() star system ticking
+            // behind the menu). The second call reset lastrealtime, zeroing the
+            // delta term, so the catch-up rate exactly cancelled the real-time
+            // advance and the clock tread water ~1s behind the audio forever.
+            // Tracking the audio position directly is idempotent (double-call
+            // safe) and keeps A/V locked with zero drift. Frame selection is
+            // quantized to the video frame rate, so sub-frame audio-clock jitter
+            // cannot cause visible stutter.
+            double newcurtime = ts->getPlayingTime();
+            ani->setTime(newcurtime);
+            ani->lastcurtime = newcurtime;
+            ani->lastrealtime = realtime;
+            ani->audioWasRunning = true;
         } else {
-            ani->setTime(ani->curTime() + elapsed);
+            ani->audioWasRunning = false;
+            // No audio clock (or audio stalled): free-run on a wall clock
+            // anchored at the first free-run frame. This is idempotent within a
+            // frame (so the base-interface and star-system update passes can't
+            // double-advance the same texture) and strictly monotonic (so it
+            // never seeks backwards the way curTime()+elapsed did after the
+            // universe-load stall).
+            if (ani->lastrealtime == 0) {
+                ani->lastrealtime = realtime;        // anchor wall clock
+                ani->lastcurtime = ani->curTime();   // starting offset (usually 0)
+            }
+            ani->setTime(ani->lastcurtime + (realtime - ani->lastrealtime));
         }
     }
 }
@@ -337,6 +360,7 @@ void AnimatedTexture::AniInit() {
     nextactive = 0;
     active_fraction = 0;
     curtime = lastcurtime = lastrealtime = 0;
+    audioWasRunning = false;
     constframerate = true;
     done = false;
 }
@@ -424,6 +448,12 @@ void AnimatedTexture::Reset() {
     img_sides = SIDE_SINGLE;
     physicsactive = numframes * timeperframe;
     done = false;
+    // Re-anchor the free-run wall clock in UpdateAllFrame. Without this a reused animation (the comm
+    // talking heads are loaded once at startup and Reset() for each message) jumps to "minutes since
+    // the clock was first anchored" on its next update and is Done() at once, so the face never shows.
+    lastcurtime = 0;
+    lastrealtime = 0;
+    audioWasRunning = false;
 }
 
 static void alltrim(string &str) {
