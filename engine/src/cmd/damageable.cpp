@@ -274,17 +274,17 @@ void Damageable::ApplyDamage(const Vector &pnt,
             // Hull is hit - shake hardest
             shot_at_cockpit->Shake(inflicted_damage.total_damage, 2);
 
-            unit->playHullDamageSound(pnt);
+            unit->playHullDamageSound(localpnt);   // PGG: the sound code expects a ship-local point (as 0.5.1 passed it)
         } else if (inflicted_damage.inflicted_damage_by_layer[1] > 0) {
             // Armor is hit - shake harder
             shot_at_cockpit->Shake(inflicted_damage.total_damage, 1);
 
-            unit->playArmorDamageSound(pnt);
+            unit->playArmorDamageSound(localpnt);   // PGG: the sound code expects a ship-local point (as 0.5.1 passed it)
         } else {
             // Shield is hit - shake
             shot_at_cockpit->Shake(inflicted_damage.total_damage, 0);
 
-            unit->playShieldDamageSound(pnt);
+            unit->playShieldDamageSound(localpnt);   // PGG: the sound code expects a ship-local point (as 0.5.1 passed it)
         }
     }
 

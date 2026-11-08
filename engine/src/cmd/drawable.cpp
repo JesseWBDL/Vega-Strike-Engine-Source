@@ -38,6 +38,8 @@
 
 #include "unit_generic.h"
 #include "vs_globals.h"
+#include "configxml.h"
+#include "xml_support.h"
 #include "gfx/point_to_cam.h"
 #include "gfx/halo_system.h"
 #include "options.h"
@@ -194,6 +196,14 @@ void Drawable::Draw(const Transformation &parent, const Matrix &parentMatrix) {
 
     if ((unit->Destroyed()) && (!cam_setup_phase)) {
         unit->Explode(true, GetElapsedTime());
+        // PGG: as in the original game, a destroyed ship vanishes into its explosion instead of its hull (or the
+        // debris it was split into) flying on until the explosion animation finishes
+        // (graphics/hide_exploding_ships). The explosion itself is already queued above.
+        static bool hide_exploding =
+                XMLSupport::parse_bool(vs_config->getVariable("graphics", "hide_exploding_ships", "false"));
+        if (hide_exploding && !myparent) {
+            return;
+        }
     }
 
     float damagelevel = 1.0f;
