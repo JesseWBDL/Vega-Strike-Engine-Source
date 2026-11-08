@@ -33,6 +33,9 @@ void DefineOddUnitFunctions(boost::python::class_builder<UnitWrapper> &Class) {
     PYTHON_DEFINE_METHOD(Class, &UnitWrapper::setNull, "setNull");
     PYTHON_DEFINE_METHOD(Class, &UnitWrapper::isNull, "isNull");
     PYTHON_DEFINE_METHOD(Class, &UnitWrapper::notNull, "__nonzero__");
+    // Python 3 only consults __bool__; without it every Unit, including null
+    // ones, is truthy, so script checks like "if not un:" never fire.
+    PYTHON_DEFINE_METHOD(Class, &UnitWrapper::notNull, "__bool__");
     PYTHON_DEFINE_METHOD(Class, &UnitWrapper::Kill, "Kill");
     PYTHON_DEFINE_METHOD(Class, &UnitWrapper::SetTarget, "SetTarget");
     PYTHON_DEFINE_METHOD(Class, &UnitWrapper::GetTarget, "GetTarget");
