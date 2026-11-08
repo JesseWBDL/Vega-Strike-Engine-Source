@@ -1407,7 +1407,7 @@ bool CloseEnoughToNavOrDest(Unit *parent, Unit *navUnit, QVector nav) {
             XMLSupport::parse_float(vs_config->getVariable("AI", "how_far_to_stop_navigating", "100"));
     if (navUnit && navUnit->isUnit() != Vega_UnitType::planet) {
         float dist = UnitUtil::getDistance(navUnit, parent);
-        if (dist < SIMULATION_ATOM /*simulation_atom_var?*/ * parent->Velocity.Magnitude() * parent->predicted_priority
+        if (dist < simulation_atom_var /*simulation_atom_var?*/ * parent->Velocity.Magnitude() * parent->predicted_priority
                 * how_far_to_stop_moving) {
             return true;
         }

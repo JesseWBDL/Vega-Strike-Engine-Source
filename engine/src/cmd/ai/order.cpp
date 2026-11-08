@@ -269,7 +269,7 @@ void ExecuteFor::Execute() {
         done = true;
         return;
     }
-    time += SIMULATION_ATOM;
+    time += simulation_atom_var;
     if (child) {
         child->Execute();
     }

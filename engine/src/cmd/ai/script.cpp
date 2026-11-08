@@ -494,7 +494,7 @@ void AIScript::beginElement(const string &name, const AttributeList &attributes)
                         topf() = parse_float((*iter).value);
                         break;
                     case SIMATOM:
-                        topf() = SIMULATION_ATOM;
+                        topf() = simulation_atom_var;
                     case DUPLIC:
                         xml->floats.pop();                 //get rid of dummy vector pushed on above
                         xml->floats.push(xml->floats.top());

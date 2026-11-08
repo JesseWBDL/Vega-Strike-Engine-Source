@@ -132,14 +132,15 @@ int getPhysicsPriority(Unit *un) {
     float tooclose = 0;
     unsigned int np = _Universe->numPlayers();
     Cockpit *cockpit = _Universe->AccessCockpit();
-    //static float     fixed_system_orbit_priorities =
-    //    XMLSupport::parse_float( vs_config->getVariable( "physics", "fixed_system_priority_velocity_cutoff", "3" ) );
+    static float fixed_system_orbit_priorities = XMLSupport::parse_float(
+            vs_config->getVariable("physics", "fixed_system_priority_velocity_cutoff", "50"));
     static int SYSTEM_INSTALLATION_PRIORITY = XMLSupport::parse_int(
             vs_config->getVariable("physics", "priorities", "system_installation", "3"));
     bool system_installation = un->owner == getTopLevelOwner();
-    bool force_system_installation_priority = true;
-    //if (system_installation && un->Velocity.MagnitudeSquared() > fixed_system_orbit_priorities*fixed_system_orbit_priorities)
-    //    force_system_installation_priority = true;
+    // 0.5.1 behaviour: only fast-moving system installations are pinned to the low priority. Forcing it for every
+    // unit made all NPCs in the player's system think and steer every 3rd frame (weaving, rarely firing).
+    bool force_system_installation_priority = system_installation
+            && un->GetVelocity().MagnitudeSquared() > fixed_system_orbit_priorities * fixed_system_orbit_priorities;
     for (unsigned int i = 0; i < np; ++i) {
         Unit *player = _Universe->AccessCockpit(i)->GetParent();
         if (player) {
