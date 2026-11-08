@@ -1651,13 +1651,16 @@ inline const char *GetColorFromSuccess(float suc) {
 void DrawObjectivesTextPlane(TextPlane *tp, int scrolloffset, Unit *parent) {
     std::string rez("\n");
     std::string rezcompleted("");
+    int shown_missions = 0;   // PGG: number the missions the player sees (1, 2...), not their slot in
+                              // active_missions, whose first slots hold background scripts with no objectives
     for (unsigned int i = 0; i < active_missions.size(); ++i) {
         if (!active_missions[i]->objectives.empty()) {
+            ++shown_missions;
             rez += "#FFFFFF";
             const bool force_anonymous_missions = configuration()->general_config.force_anonymous_mission_names;
             const bool completed_objectives_last = configuration()->graphics_config.hud.completed_objectives_last;
             if (active_missions[i]->mission_name.empty() || force_anonymous_missions) {
-                rez += "Mission " + XMLSupport::tostring((int) i) + "\n";
+                rez += "Mission " + XMLSupport::tostring(shown_missions) + "\n";
             } else {
                 rez += active_missions[i]->mission_name + "\n";
             }

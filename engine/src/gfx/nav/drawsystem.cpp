@@ -72,6 +72,31 @@
 //draws the draw lists, with the mouse lists cycled 'n' times (according to kliks)
 //**********************************
 
+string getUnitNameAndFgNoBase(Unit *target);   // gfx/vdu.cpp
+extern bool TargMission(Unit *me, Unit *target);   // cmd/ai/firekeyboard.cpp
+
+// PGG: is this unit part of an active mission (a mission script called setMissionRelevant on it) whose
+// objective naming it is not yet complete? Objectives don't link to units, so match on the unit's name;
+// a relevant unit no objective names (e.g. a target ship) counts as outstanding.
+static bool IsOutstandingMissionUnit(Unit *un) {
+    if (!un || !TargMission(nullptr, un)) {
+        return false;
+    }
+    const string name = getUnitNameAndFgNoBase(un);
+    bool named = false;
+    for (unsigned int i = 0; i < active_missions.size(); ++i) {
+        for (const auto &obj : active_missions[i]->objectives) {
+            if (!name.empty() && obj.objective.find(name) != string::npos) {
+                if (obj.completeness < 1) {
+                    return true;
+                }
+                named = true;
+            }
+        }
+    }
+    return !named;
+}
+
 void NavigationSystem::DrawSystem() {
     UniverseUtil::PythonUnitIter bleh = UniverseUtil::getUnitList();
     if (!(*bleh)) {
@@ -86,11 +111,31 @@ void NavigationSystem::DrawSystem() {
     int faction =
             FactionUtil::GetFactionIndex(UniverseUtil::GetGalaxyFaction(_Universe->activeStarSystem()->getFileName()));
     //GFXColor factioncolor = factioncolours[faction];
+    // PGG: 0.9.1 keeps the system's file path ("Gemini/Troy.system") as its name, where 0.5.1 had the XML
+    // name ("Troy"); the long path ran the title off the nav grid, so show only the system part.
+    string shownname = _Universe->activeStarSystem()->getName();
+    string::size_type slash = shownname.find_last_of("/\\");
+    if (slash != string::npos) {
+        shownname = shownname.substr(slash + 1);
+    }
+    if (shownname.size() > 7 && shownname.compare(shownname.size() - 7, 7, ".system") == 0) {
+        shownname.erase(shownname.size() - 7);
+    }
     string systemnamestring =
             "#ff0000Sector: #ffff00" + getStarSystemSector(_Universe->activeStarSystem()->getFileName())
-                    + "  #ff0000Current System: #ffff00" + _Universe->activeStarSystem()->getName() + " ("
+                    + "  #ff0000Current System: #ffff00" + shownname + " ("
                     + FactionUtil::GetFactionName(faction)
                     + "#ffff00)";
+    // PGG: say what a click selected (it targets that nav point; autopilot then flies to it), since the map
+    // itself gives almost no feedback.
+    if (Unit *navparent = _Universe->AccessCockpit()->GetParent()) {
+        if (Unit *navtarget = navparent->Target()) {
+            string tname = getUnitNameAndFgNoBase(navtarget);
+            if (!tname.empty()) {
+                systemnamestring += "\n#ff0000Selected: #00ff00" + tname;
+            }
+        }
+    }
     //int length = systemnamestring.size();
     //float offset = (float(length)*0.001);
     //systemname.SetPos( (((screenskipby4[0]+screenskipby4[1])/2)-offset) , screenskipby4[3]); // middle position
@@ -380,16 +425,26 @@ void NavigationSystem::DrawSystem() {
             system_item_scale_temp = (system_item_scale * 3);
         }
         insert_size *= system_item_scale_temp;
+        // PGG: Privateer marked nav points with an outstanding mission objective in red and the selected one in
+        // yellow (the stock target colour was red, which would clash).
+        if (IsOutstandingMissionUnit(*blah)) {
+            static GFXColor mcol = vs_config->getColor("nav", "mission_unit", GFXColor(1, 0.15, 0.15, 1));
+            DrawCircle(the_x, the_y, insert_size * 1.6f, mcol);
+            DrawCircle(the_x, the_y, insert_size * 1.75f, mcol);
+        }
         if (_Universe->AccessCockpit()->GetParent()->Target() == (*blah)) {
             //Get a color from the config
-            static GFXColor col = vs_config->getColor("nav", "targetted_unit", GFXColor(1, 0.3, 0.3, 0.8));
+            static GFXColor col = vs_config->getColor("nav", "targetted_unit", GFXColor(1, 1, 0.2, 0.9));
             DrawTargetCorners(the_x, the_y, insert_size, col);
         }
         bool tests_in_range = 0;
+        // PGG: the icons are tiny, so give each a larger mouse hotspot (graphics/nav_click_radius_scale).
+        static float click_scale =
+                XMLSupport::parse_float(vs_config->getVariable("graphics", "nav_click_radius_scale", "2.5"));
         if (insert_type == navstation) {
-            tests_in_range = TestIfInRangeBlk(the_x, the_y, insert_size, mouse_x_current, mouse_y_current);
+            tests_in_range = TestIfInRangeBlk(the_x, the_y, insert_size * click_scale, mouse_x_current, mouse_y_current);
         } else {
-            tests_in_range = TestIfInRangeRad(the_x, the_y, insert_size, mouse_x_current, mouse_y_current);
+            tests_in_range = TestIfInRangeRad(the_x, the_y, insert_size * click_scale, mouse_x_current, mouse_y_current);
         }
         Unit *myunit = (*blah);
 

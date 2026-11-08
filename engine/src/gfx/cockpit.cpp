@@ -2736,6 +2736,11 @@ void GameCockpit::SetParent(Unit *unit, const char *filename, const char *unitmo
 void GameCockpit::OnDockEnd(Unit *station, Unit *ship) {
     if (_Universe->isPlayerStarship(ship)) {
         updateRadar(ship);
+        // PGG: launching starts with the nav map closed. If it was open when the player docked or died (and
+        // restarted from a base), it stayed open after launch, with the flight mouse handlers already back.
+        if (CanDrawNavSystem()) {
+            SetDrawNavSystem(0);
+        }
     }
 }
 

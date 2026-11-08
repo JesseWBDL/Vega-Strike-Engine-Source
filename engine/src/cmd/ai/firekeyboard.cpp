@@ -1517,6 +1517,25 @@ static void DoDockingOps(Unit *parent, Unit *targ, unsigned char playa, unsigned
 
 using std::list;
 
+// PGG: once the player has sent a comm message, put any VDU still showing the message list back on the
+// target overview, as Privateer did. A reply's talking head is pushed on top of that and pops back to it.
+static void ReturnCommVDUsToTarget() {
+    Cockpit *cp = _Universe->AccessCockpit();
+    for (int v = 0; v < 2; ++v) {
+        if (cp->getVDUMode(v) != VDU::COMM) {
+            continue;
+        }
+        for (int i = 0; i < 32 && cp->getVDUMode(v) != VDU::TARGET; ++i) {
+            cp->VDUSwitch(v);
+        }
+        if (cp->getVDUMode(v) != VDU::TARGET) {   // this VDU can't show TARGET: leave it on COMM
+            for (int i = 0; i < 32 && cp->getVDUMode(v) != VDU::COMM; ++i) {
+                cp->VDUSwitch(v);
+            }
+        }
+    }
+}
+
 unsigned int FireKeyboard::DoSpeechAndAni(Unit *un, Unit *parent, class CommunicationMessage &c) {
     this->AdjustRelationTo(un, c.getCurrentState()->messagedelta);
     unsigned int retval = DoSpeech(un, parent, *c.getCurrentState());
@@ -2114,6 +2133,7 @@ void FireKeyboard::Execute() {
                     }
                     mymsg->fsm = tmp;
                 }
+                ReturnCommVDUsToTarget();
             }
         }
     }

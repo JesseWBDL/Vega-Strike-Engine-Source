@@ -29,7 +29,11 @@
 
 
 #include <set>
+#include <map>
+#include <regex>
+#include <algorithm>
 #include "vs_logging.h"
+#include "vsfilesystem.h"
 #include "vs_globals.h"
 #include "vegastrike.h"
 #include "gfx/gauge.h"
@@ -133,12 +137,16 @@ void NavigationSystem::Setup() {
     rx = -0.5;              //galaxy mode settings
     ry = 0.5;
     rz = 0.0;
-    zoom = 1.8;
+    // PGG: start the sector (quadrant) map zoomed in so the systems don't sit in one clump in the middle
+    // (stock 1.8). graphics/nav_galaxy_zoom overrides; the mouse wheel still adjusts it.
+    zoom = XMLSupport::parse_float(vs_config->getVariable("graphics", "nav_galaxy_zoom", "2.6"));
 
     rx_s = -0.5;              //system mode settings
     ry_s = 1.5;
     rz_s = 0.0;
-    zoom_s = 1.8;
+    // PGG: start the system map zoomed in so the nav points spread over the grid instead of its middle
+    // (stock 1.8). graphics/nav_system_zoom overrides; the mouse wheel still adjusts it.
+    zoom_s = XMLSupport::parse_float(vs_config->getVariable("graphics", "nav_system_zoom", "2.0"));
 
     scrolloffset = 0;
 
@@ -893,7 +901,126 @@ void NavigationSystem::DrawSectorList() {
     }
 }
 
+// PGG: Privateer's quadrant map filled the info screen with the selected system's bases:
+//   System : Varnus / Bases : / - Rilke / (Refinery) / - Rodin / (Agricultural)
+// Read them from the system file (cached per system): every <planet> with a planets/<type> texture and
+// every <unit> whose file is a base model. Commented-out entries are ignored, repeats listed once.
+static std::string BaseTypeLabel(const std::string &tag, const std::string &file, const std::string &faction) {
+    std::string lfile = file, lfaction = faction;
+    std::transform(lfile.begin(), lfile.end(), lfile.begin(), ::tolower);
+    std::transform(lfaction.begin(), lfaction.end(), lfaction.begin(), ::tolower);
+    if (tag == "planet") {
+        if (lfile.compare(0, 8, "planets/") != 0) {
+            return "";      // suns, jump points, nav buoys
+        }
+        std::string type = lfile.substr(8);
+        type = type.substr(0, type.find('.'));
+        std::string out;
+        bool word_start = true;
+        for (char c : type) {
+            if (c == '_') {
+                out += ' ';
+                word_start = true;
+            } else {
+                out += word_start ? (char) toupper((unsigned char) c) : c;
+                word_start = false;
+            }
+        }
+        if (out == "Church Of Man") {
+            out = "Church of Man";
+        }
+        return out;
+    }
+    if (lfile == "mining_base") {
+        return lfaction.compare(0, 6, "pirate") == 0 ? "Pirate" : "Mining";
+    }
+    if (lfile == "refinery") {
+        return lfaction.compare(0, 6, "pirate") == 0 ? "Pirate" : "Refinery";
+    }
+    if (lfile == "perry" || lfile == "new_constantinople") {
+        return "Military";
+    }
+    return "";              // asteroid fields, moons, capital ships
+}
+
+static std::string SystemBasesText(const std::string &system) {
+    static std::map<std::string, std::string> cache;
+    std::map<std::string, std::string>::const_iterator hit = cache.find(system);
+    if (hit != cache.end()) {
+        return hit->second;
+    }
+    std::string content;
+    {
+        VSFileSystem::VSFile f;
+        if (f.OpenReadOnly(system + ".system", VSFileSystem::SystemFile) <= VSFileSystem::Ok) {
+            content = f.ReadFull();
+            f.Close();
+        }
+    }
+    std::string text;
+    if (!content.empty()) {
+        static const std::regex comment("<!--[\\s\\S]*?-->");
+        static const std::regex element("<\\s*(planet|unit)\\b([^>]*)>", std::regex::icase);
+        static const std::regex name_attr("\\bname\\s*=\\s*\"([^\"]*)\"", std::regex::icase);
+        static const std::regex file_attr("\\bfile\\s*=\\s*\"([^\"]*)\"", std::regex::icase);
+        static const std::regex faction_attr("\\bfaction\\s*=\\s*\"([^\"]*)\"", std::regex::icase);
+        content = std::regex_replace(content, comment, "");
+        std::set<std::string> seen;
+        for (std::sregex_iterator it(content.begin(), content.end(), element), end; it != end; ++it) {
+            std::string tag = (*it)[1].str();
+            std::transform(tag.begin(), tag.end(), tag.begin(), ::tolower);
+            const std::string attrs = (*it)[2].str();
+            std::smatch m;
+            std::string name, file, faction;
+            if (std::regex_search(attrs, m, name_attr)) {
+                name = m[1].str();
+            }
+            if (std::regex_search(attrs, m, file_attr)) {
+                file = m[1].str();
+            }
+            if (std::regex_search(attrs, m, faction_attr)) {
+                faction = m[1].str();
+            }
+            const std::string type = BaseTypeLabel(tag, file, faction);
+            if (name.empty() || type.empty() || !seen.insert(name).second) {
+                continue;
+            }
+            std::replace(name.begin(), name.end(), '_', ' ');
+            text += " - " + name + "\n   (" + type + ")\n";
+        }
+    }
+    if (text.empty()) {
+        text = " none\n";
+    }
+    cache[system] = text;
+    return text;
+}
+
 void NavigationSystem::DrawObjectives() {
+    static const bool sector_system_info =
+            XMLSupport::parse_bool(vs_config->getVariable("graphics", "nav_sector_system_info", "false"));
+    if (sector_system_info && checkbit(whattodraw, 4) && checkbit(whattodraw, 1) && checkbit(whattodraw, 2)
+            && systemselectionindex < systemIter.size()) {
+        // PGG: on the sector (quadrant) map the info screen describes the selected system, as in Privateer.
+        const std::string &sysname = systemIter[systemselectionindex].GetName();
+        string csector, csystem;
+        Beautify(sysname, csector, csystem);
+        std::string rez = "\n#00C000System : " + csystem + "\n\n";
+        if (systemIter[systemselectionindex].isDrawable()) {
+            rez += "Bases :\n" + SystemBasesText(sysname);
+        } else {
+            rez += "No information available\n";
+        }
+        const float background_alpha = configuration()->graphics_config.hud.text_background_alpha;
+        GFXColor tpbg = screen_objectives.bgcol;
+        bool automatte = (0 == tpbg.a);
+        if (automatte) {
+            screen_objectives.bgcol = GFXColor(0, 0, 0, background_alpha);
+        }
+        screen_objectives.Draw(rez, 0, false, false, automatte);
+        screen_objectives.bgcol = tpbg;
+        return;
+    }
     if (checkbit(whattodraw, 4)) {
         //Draw the objectives screen!
         DrawObjectivesTextPlane(&screen_objectives, scrolloffset, _Universe->AccessCockpit()->GetParent());
@@ -1117,8 +1244,27 @@ void NavigationSystem::DrawButton(float &x1, float &x2, float &y1, float &y2, in
             label = "Nav Comp";
         }
     }
+    // PGG: a mod can name the buttons to match its console (graphics/nav_button_label_<n>); PGG's console
+    // has SYSTEM, SECTOR, SELECT and ROUTE. Its button textures did not reliably show their printed labels.
+    {
+        static std::string custom[8];
+        static bool custom_read = false;
+        if (!custom_read) {
+            for (int b = 1; b <= 7; ++b) {
+                custom[b] = vs_config->getVariable("graphics", "nav_button_label_" + XMLSupport::tostring(b), "");
+            }
+            custom_read = true;
+        }
+        if (button_number >= 1 && button_number <= 7 && !custom[button_number].empty()) {
+            label = custom[button_number];
+        }
+    }
+    // dark by default, like the words PGG's console buttons had printed on them
+    static GFXColor label_col = vs_config->getColor("nav", "button_label", GFXColor(0.05, 0.05, 0.05, 1));
+    static bool label_matte =
+            XMLSupport::parse_bool(vs_config->getVariable("graphics", "nav_button_label_matte", "true"));
     TextPlane a_label;
-    a_label.col = GFXColor(1, 1, 1, 1);
+    a_label.col = label_col;
     int length = label.size();
     float offset = (float(length) * 0.0065);
     float xl = (x1 + x2) / 2.0;
@@ -1130,7 +1276,7 @@ void NavigationSystem::DrawButton(float &x1, float &x2, float &y1, float &y2, in
     if (nav_button_labels) {
         const float background_alpha = configuration()->graphics_config.hud.text_background_alpha;
         GFXColor tpbg = a_label.bgcol;
-        bool automatte = (0 == tpbg.a);
+        bool automatte = label_matte && (0 == tpbg.a);
         if (automatte) {
             a_label.bgcol = GFXColor(0, 0, 0, background_alpha);
         }
@@ -1188,6 +1334,10 @@ void NavigationSystem::DrawButton(float &x1, float &x2, float &y1, float &y2, in
             if (((checkbit(whattodraw, 1)) && (checkbit(whattodraw, 2)))             //Nav-Galaxy Mode
                     || ((!checkbit(whattodraw, 1)) && (checkbit(whattodraw, 3)))) {              //Mission-Sector Mode
                 setDestinationSystemIndex(systemselectionindex);
+            } else if (checkbit(whattodraw, 1) && !checkbit(whattodraw, 2)) {
+                // PGG: on the system map, SELECT confirms the nav point picked by clicking (it is already the
+                // ship's target, which autopilot flies to) and closes the map, as Privateer's nav computer did.
+                GameCockpit::NavScreen(KBData(), PRESS);
             }
         }
         //******************************************************
@@ -1196,7 +1346,10 @@ void NavigationSystem::DrawButton(float &x1, float &x2, float &y1, float &y2, in
         //******************************************************
         if (button_number == 4) {
             //hit --UP--
-            if (checkbit(whattodraw, 1)) {
+            if (checkbit(whattodraw, 1) && checkbit(whattodraw, 2)) {
+                // PGG: SECTOR and SYSTEM both toggle between the two maps, like Privateer's QUAD/SYS button
+                unsetbit(whattodraw, 2);                      //draw system
+            } else if (checkbit(whattodraw, 1)) {
                 //if in nav system NOT mission
                 dosetbit(whattodraw, 2);                      //draw galaxy
                 setFocusedSystemIndex(currentsystemindex);
@@ -1213,7 +1366,12 @@ void NavigationSystem::DrawButton(float &x1, float &x2, float &y1, float &y2, in
         //******************************************************
         if (button_number == 5) {
             //hit --DOWN--
-            if (checkbit(whattodraw, 1)) {
+            if (checkbit(whattodraw, 1) && !checkbit(whattodraw, 2)) {
+                // PGG: toggle to the sector map (see button 4)
+                dosetbit(whattodraw, 2);                      //draw galaxy
+                setFocusedSystemIndex(currentsystemindex);
+                systemselectionindex = currentsystemindex;
+            } else if (checkbit(whattodraw, 1)) {
                 //if in nav system NOT mission
 
                 unsetbit(whattodraw, 2);                      //draw system
@@ -1491,7 +1649,10 @@ bool NavigationSystem::CheckDraw() {
 void NavigationSystem::Adjust3dTransformation(bool three_d, bool system_vs_galaxy) {
     //Adjust transformation
     //**********************************
-    if ((mouse_previous_state[0] == 1)
+    // PGG: Privateer's nav map could not be dragged around; left-drag panning/rotating is off unless
+    // graphics/nav_drag_pan is set true. The mouse wheel still zooms.
+    static bool drag_pan = XMLSupport::parse_bool(vs_config->getVariable("graphics", "nav_drag_pan", "false"));
+    if (drag_pan && (mouse_previous_state[0] == 1)
             && TestIfInRange(screenskipby4[0], screenskipby4[1], screenskipby4[2], screenskipby4[3], mouse_x_current,
                     mouse_y_current)) {
         if (system_vs_galaxy) {

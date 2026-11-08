@@ -524,10 +524,19 @@ bool DrawNavSystem(NavigationSystem* nav_system, Camera* camera, float cockpit_o
         return false;
     }
 
-    camera->SetFov( camera->GetFov() );
-    camera->setCockpitOffset( cockpit_offset );
+    // PGG: draw the nav console the way 0.5.1 did (GameCockpit::DrawNavSystem there): with the base FOV
+    // (graphics/base_fov, default 90) and no cockpit offset. Drawing it with the flight FOV (60) and the
+    // cockpit offset magnified the console ~1.7x and shifted it, so only its top-left part was on screen
+    // while the map items and the mouse used the unmagnified layout.
+    static float standard_fov = XMLSupport::parse_float(vs_config->getVariable("graphics", "base_fov", "90"));
+    const float old_fov = camera->GetFov();
+    camera->SetFov( standard_fov );
+    camera->setCockpitOffset( 0 );
     camera->UpdateGFX( GFXFALSE, GFXFALSE, GFXTRUE );
     nav_system->Draw();
+    camera->SetFov( old_fov );
+    camera->setCockpitOffset( cockpit_offset );
+    camera->UpdateGFX( GFXFALSE, GFXFALSE, GFXTRUE );
 
     return true;
 }

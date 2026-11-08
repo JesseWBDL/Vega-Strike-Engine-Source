@@ -31,6 +31,7 @@
 /// Draws in-system map, and  galaxy map of known sectors and systems
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include "vs_globals.h"
 #include "vegastrike.h"
@@ -858,6 +859,7 @@ void NavigationSystem::DrawGalaxy() {
 
     //Enlist the items and attributes
     //**********************************
+    float nearest_d2 = 0;   // distance (squared) from the pointer to the system at the back of mouselist
     systemIter.seek();
     while (!systemIter.done()) {
         //this draws the points
@@ -970,9 +972,22 @@ void NavigationSystem::DrawGalaxy() {
         if (std::fabs(zdistance) < 2.0f * camera_z) {
             DisplayOrientationLines(the_x, the_y, the_x_flat, the_y_flat, 0);
         }
-        if (TestIfInRangeRad(the_x, the_y, insert_size, mouse_x_current, mouse_y_current)) {
-            mouselist.push_back(systemdrawnode(insert_type, insert_size, the_x, the_y, (*systemIter).GetName(),
-                    systemIter.getIndex(), screenoccupation, false, isPath ? pathcol : col));
+        // PGG: the system dots are tiny, so give each a larger mouse hotspot (graphics/nav_click_radius_scale);
+        // where hotspots overlap, the system nearest the pointer ends up last in the list, which is the one taken.
+        static float click_scale =
+                XMLSupport::parse_float(vs_config->getVariable("graphics", "nav_click_radius_scale", "2.5"));
+        if (TestIfInRangeRad(the_x, the_y, insert_size * click_scale, mouse_x_current, mouse_y_current)) {
+            const float dx = the_x - mouse_x_current;
+            const float dy = the_y - mouse_y_current;
+            const float d2 = dx * dx + dy * dy;
+            systemdrawnode node(insert_type, insert_size, the_x, the_y, (*systemIter).GetName(),
+                    systemIter.getIndex(), screenoccupation, false, isPath ? pathcol : col);
+            if (mouselist.empty() || d2 < nearest_d2) {
+                mouselist.push_back(node);
+                nearest_d2 = d2;
+            } else {
+                mouselist.insert(mouselist.begin(), node);
+            }
             moused = true;
         }
         unsigned destsize = systemIter->GetDestinationSize();
@@ -982,9 +997,14 @@ void NavigationSystem::DrawGalaxy() {
             const int vsize = 3 + 4;
             std::vector<float> verts(2 * destsize * vsize);
             std::vector<float>::iterator v = verts.begin();
+            // PGG: a charted system shows all of its jump lines, as in the original quadrant maps; a line to an
+            // uncharted system fades out towards it rather than being hidden (graphics/nav_links_to_uncharted).
+            static bool links_to_uncharted =
+                    XMLSupport::parse_bool(vs_config->getVariable("graphics", "nav_links_to_uncharted", "false"));
             for (unsigned i = 0; i < destsize; ++i) {
                 CachedSystemIterator::SystemInfo &oth = systemIter[systemIter->GetDestinationIndex(i)];
-                if (oth.isDrawable()) {
+                const bool oth_charted = oth.isDrawable();
+                if (oth_charted || links_to_uncharted) {
                     QVector posoth = oth.Position();
                     ReplaceAxes(posoth);
 
@@ -1007,6 +1027,10 @@ void NavigationSystem::DrawGalaxy() {
                     othcol.a =
                             (new_system_item_scale_temp
                                     - minimumitemscaledown) / (maximumitemscaleup - minimumitemscaledown) + alphaadd;
+                    if (!oth_charted) {
+                        othcol = col;
+                        othcol.a = col.a * 0.15f;
+                    }
                     //GetAlpha(oldposoth,center_x,center_y,center_z,zdistance);
                     IntersectBorder(the_new_x, the_new_y, the_x, the_y);
 
@@ -1092,6 +1116,23 @@ void NavigationSystem::DrawGalaxy() {
             if (systemselectionindex == oldselection) {
                 setFocusedSystemIndex(systemselectionindex);
             }
+        }
+    } else if (mouse_wentdown[0] == 1
+            && TestIfInRange(screenskipby4[0], screenskipby4[1], screenskipby4[2], screenskipby4[3],
+                    mouse_x_current, mouse_y_current)) {
+        // PGG: double-clicking a system zooms in on it; double-clicking empty map space goes back to the
+        // normal quadrant view around the current system (at the starting zoom).
+        using clock = std::chrono::steady_clock;
+        static clock::time_point last_empty_click;
+        const clock::time_point now = clock::now();
+        if (now - last_empty_click < std::chrono::milliseconds(500)) {
+            static const float default_zoom =
+                    XMLSupport::parse_float(vs_config->getVariable("graphics", "nav_galaxy_zoom", "2.6"));
+            setFocusedSystemIndex(currentsystemindex);
+            zoom = default_zoom;
+            last_empty_click = clock::time_point();
+        } else {
+            last_empty_click = now;
         }
     }
     //**********************************
