@@ -36,10 +36,12 @@
 #else
 #include <AL/al.h>
 #include <AL/alc.h>
+#include <AL/alext.h>
 #endif
 #include <stdlib.h>
 #include <stdio.h>
 
+#include <chrono>
 #include <vector>
 
 #include "audiolib.h"
@@ -172,9 +174,63 @@ bool AUDInit() {
 
     g_game.sound_enabled = vs_options::instance().Sound;
 
+    VS_LOG(info, (boost::format("audio: device '%1%', device-lost recovery %2%")
+            % alcGetString(dev, ALC_DEVICE_SPECIFIER)
+            % ((alcIsExtensionPresent(dev, "ALC_EXT_disconnect") && alcIsExtensionPresent(dev, "ALC_SOFT_reopen_device"))
+               ? "available" : "NOT available")));
+
     return true;
 #endif
     return false;
+}
+
+void AUDCheckDevice() {
+#ifdef HAVE_AL
+    //PGG: when Windows invalidates the audio endpoint (laptop sleep/hibernate, headset unplugged) OpenAL Soft
+    //marks the device disconnected and every source goes silent for good. Poll once a second and reopen it in
+    //place; contexts, buffers and sources survive, playing sources are left stopped, and the game's existing
+    //"is it still playing?" checks restart music and looping sounds.
+    if (dev == NULL) {
+        return;
+    }
+    using clock = std::chrono::steady_clock;
+    static clock::time_point last_check = clock::now();
+    const clock::time_point now = clock::now();
+    if (now - last_check < std::chrono::seconds(1)) {
+        return;
+    }
+    last_check = now;
+
+    static const bool can_detect = alcIsExtensionPresent(dev, "ALC_EXT_disconnect") != ALC_FALSE;
+    if (!can_detect) {
+        return;
+    }
+    ALCint connected = ALC_TRUE;
+    alcGetIntegerv(dev, ALC_CONNECTED, 1, &connected);
+    static bool reported_loss = false;
+    if (connected != ALC_FALSE) {
+        reported_loss = false;
+        return;
+    }
+
+    static const LPALCREOPENDEVICESOFT reopen =
+            alcIsExtensionPresent(dev, "ALC_SOFT_reopen_device")
+            ? reinterpret_cast<LPALCREOPENDEVICESOFT>(alcGetProcAddress(dev, "alcReopenDeviceSOFT"))
+            : nullptr;
+    if (!reported_loss) {
+        VS_LOG_AND_FLUSH(warning, "audio: output device lost; trying to reopen the default device");
+        reported_loss = true;
+    }
+    if (reopen == nullptr) {
+        return;
+    }
+    const ALCint attrs[] = {ALC_FREQUENCY, g_game.audio_frequency_mode, 0};
+    if (reopen(dev, NULL, attrs)) {
+        VS_LOG_AND_FLUSH(info, (boost::format("audio: reopened output device '%1%'")
+                % alcGetString(dev, ALC_DEVICE_SPECIFIER)));
+    }
+    //On failure (no device yet) we try again next second.
+#endif
 }
 
 void AUDDestroy() {

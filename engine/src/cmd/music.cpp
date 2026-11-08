@@ -704,6 +704,7 @@ void Music::CleanupMuzak() {
 }
 
 void Music::MuzakCycle() {
+    AUDCheckDevice();   //PGG: runs every frame in flight, bases and menus
     if (muzak) {
         if (BaseInterface::CurrentBase != NULL) {
             if (!BaseInterface::CurrentBase->isDJEnabled()) {

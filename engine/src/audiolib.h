@@ -32,6 +32,8 @@
 #include <string>
 bool AUDInit();
 void AUDDestroy();
+///PGG: reopen the audio device if Windows dropped it (sleep/hibernate, device unplugged). Cheap; call every frame.
+void AUDCheckDevice();
 ///Sets the size in which all sounds are going to be played
 void AUDListenerSize(const float size);
 void AUDListener(const QVector &pos, const Vector &vel);
