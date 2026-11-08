@@ -72,6 +72,14 @@ class OpenALStreamingSound : public SimpleSound {
     unsigned char readBufferIndex;
     unsigned char playBufferIndex;
 
+    // Number of buffers currently filled and handed to the AL queue (not yet
+    // unqueued). Needed to disambiguate a full ring from an empty one: with
+    // only the indices, playBufferIndex==readBufferIndex is true both when the
+    // ring is full (just filled) AND when it has been completely drained by an
+    // underrun — the latter would otherwise be misread as "full", so refill
+    // would stop and the source would die permanently after any underrun.
+    unsigned int queuedBufferCount;
+
 public:
     /** Internal constructor used by derived classes
      * @param name the resource's name

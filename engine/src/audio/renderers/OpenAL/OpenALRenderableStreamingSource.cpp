@@ -174,6 +174,23 @@ void OpenALRenderableStreamingSource::updateImpl(int flags, const Listener &scen
         startedPlaying = true;
     } else {
         queueALBuffers();
+
+        // Recover from a buffer-underrun stop. isPlayingImpl() reports "playing"
+        // at the framework level (startedPlaying && !atEos) even when the AL
+        // source has actually run dry and transitioned to AL_STOPPED — e.g. when
+        // a load stall starved the refill. In that case the queueALBuffers() above
+        // has just re-filled the queue, so kick the AL source back into playing.
+        if (shouldBePlaying() && !atEos) {
+            ALint st = AL_PLAYING;
+            ALint q = 0;
+            alGetSourcei(als, AL_SOURCE_STATE, &st);
+            alGetSourcei(als, AL_BUFFERS_QUEUED, &q);
+            if (st != AL_PLAYING && q > 0) {
+                clearAlError();
+                alSourcePlay(als);
+                checkAlError();
+            }
+        }
     }
 
     // Update various attributes if required

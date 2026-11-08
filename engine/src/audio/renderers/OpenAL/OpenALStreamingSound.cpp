@@ -123,6 +123,8 @@ void OpenALStreamingSound::flushBuffers() {
     // Mark the playBufferIndex as uninitialized, by setting it to NUM_BUFFERS
     // readAndFlip will initialize it later.
     playBufferIndex = NUM_BUFFERS;
+
+    queuedBufferCount = 0;
 }
 
 void OpenALStreamingSound::unloadImpl() {
@@ -139,8 +141,10 @@ ALBufferHandle OpenALStreamingSound::readAndFlip() {
         throw ResourceNotLoadedException(getName());
     }
 
-    // Check for a full queue
-    if (playBufferIndex == readBufferIndex) {
+    // Check for a full queue. Use the explicit count, NOT (playBufferIndex ==
+    // readBufferIndex): that index equality is also true for an empty ring
+    // after a full drain/underrun, which would wrongly stop refilling.
+    if (queuedBufferCount >= NUM_BUFFERS) {
         return AL_NULL_BUFFER;
     }
 
@@ -167,12 +171,16 @@ ALBufferHandle OpenALStreamingSound::readAndFlip() {
     }
 
     readBufferIndex = (readBufferIndex + 1) % NUM_BUFFERS;
+    ++queuedBufferCount;
     return bufferHandle;
 }
 
 void OpenALStreamingSound::unqueueBuffer(ALBufferHandle buffer) {
     if (playBufferIndex < NUM_BUFFERS && buffer == bufferHandles[playBufferIndex]) {
         playBufferIndex = (playBufferIndex + 1) % NUM_BUFFERS;
+        if (queuedBufferCount > 0) {
+            --queuedBufferCount;
+        }
     }
 }
 
